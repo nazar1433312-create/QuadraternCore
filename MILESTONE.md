@@ -1,6 +1,6 @@
-# Текущий milestone: testnet-1 — базовый гибрид PoW+PoS
+# Текущий milestone: testnet-2 — мульти-алго консенсус
 
-Один алгоритм (SHA-256), PoS-валидация случайным стейкером, виртуальный стейкинг-пул
-со снэпшотом на N-1 и pull-моделью выплат. Без ранговой системы нод.
+Добавлены ProgPoW и RandomX параллельно SHA-256. Zawy v4 LWMA per-algo difficulty,
+динамический вес блока в fork-choice, анти-спам rate-limit фильтры.
 
-Подробности: см. ROADMAP.md → раздел "Milestone: testnet-1".
+Подробности: см. ROADMAP.md → раздел "Milestone: testnet-2".
