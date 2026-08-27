@@ -1,6 +1,6 @@
-# Текущий milestone: testnet-2 — мульти-алго консенсус
+# Текущий milestone: testnet-3 — сетевая иерархия и управление
 
-Добавлены ProgPoW и RandomX параллельно SHA-256. Zawy v4 LWMA per-algo difficulty,
-динамический вес блока в fork-choice, анти-спам rate-limit фильтры.
+Полная ранговая лестница нод, кворумы A/Б, слэшинг, Vice-Seed протокол,
+Treasury-мультисиг 4-из-5.
 
-Подробности: см. ROADMAP.md → раздел "Milestone: testnet-2".
+Подробности: см. ROADMAP.md → раздел "Milestone: testnet-3".
