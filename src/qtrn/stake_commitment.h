@@ -12,6 +12,7 @@
 #ifndef BITCOIN_QTRN_STAKE_COMMITMENT_H
 #define BITCOIN_QTRN_STAKE_COMMITMENT_H
 
+#include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <pubkey.h>
 #include <script/script.h>
@@ -84,6 +85,21 @@ bool VerifyStakeCommitment(const StakeCommitment& commitment, const uint256& sig
 //! (stake_selection.h) — exposed so this module and the virtual-staking-pool
 //! module (candidate-list assembly, not yet built) agree on one mapping.
 uint256 StakeValidatorIdFromPubKey(const CPubKey& pubKey);
+
+//! The hash a stake commitment's signature actually covers. NOT block.GetHash()
+//! — see the long comment on StakeCommitment::signature for why that would be
+//! circular. Instead: take block.vtx[0] (the coinbase), strip out its stake
+//! commitment output if one is present, recompute the block's merkle root
+//! with that stripped coinbase substituted in place of the real one, and
+//! hash a header built from the real header fields plus that merkle root.
+//!
+//! This one function serves both directions by construction: a miner calls
+//! it on a block whose coinbase has no commitment yet (nothing to strip) to
+//! get the hash the chosen validator must sign; a validating node calls it
+//! on the fully assembled block it received (commitment present, now
+//! stripped back out) to get the same hash back, to check against the
+//! signature it found via FindStakeCommitment.
+uint256 ComputeStakeSigningHash(const CBlock& block);
 
 } // namespace qtrn
 

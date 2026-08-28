@@ -4,7 +4,9 @@
 
 #include <qtrn/stake_commitment.h>
 
+#include <consensus/merkle.h>
 #include <key.h>
+#include <primitives/block.h>
 #include <script/script.h>
 #include <test/util/setup_common.h>
 #include <uint256.h>
@@ -16,6 +18,35 @@ using namespace qtrn;
 BOOST_FIXTURE_TEST_SUITE(qtrn_stake_commitment_tests, BasicTestingSetup)
 
 namespace {
+
+// Minimal coinbase-shaped block: one input carrying `tag` as scriptSig data
+// (so callers can make two otherwise-identical blocks differ), one ordinary
+// payout output, and — unless `withCommitment` — nothing else. Mirrors the
+// coinbase-construction pattern chainparams.cpp uses for genesis blocks.
+CBlock MakeTestBlock(const std::string& tag, const StakeCommitment* commitment = nullptr)
+{
+    CMutableTransaction coinbase;
+    coinbase.nVersion = 1;
+    coinbase.vin.resize(1);
+    coinbase.vin[0].scriptSig = CScript() << std::vector<unsigned char>(tag.begin(), tag.end());
+    coinbase.vout.resize(1);
+    coinbase.vout[0].nValue = 100 * COIN;
+    coinbase.vout[0].scriptPubKey = CScript() << OP_TRUE;
+    if (commitment) {
+        coinbase.vout.emplace_back(0, BuildStakeCommitmentScript(*commitment));
+        BOOST_REQUIRE(!coinbase.vout.back().scriptPubKey.empty());
+    }
+
+    CBlock block;
+    block.nVersion = 1;
+    block.nTime = 1798348800;
+    block.nBits = 0x1f00ffff;
+    block.nNonce = 0;
+    block.hashPrevBlock = uint256S("abcd");
+    block.vtx.push_back(MakeTransactionRef(std::move(coinbase)));
+    block.hashMerkleRoot = BlockMerkleRoot(block);
+    return block;
+}
 
 StakeCommitment MakeSignedCommitment(const CKey& key, uint32_t attempt, const uint256& signingHash)
 {
@@ -150,6 +181,56 @@ BOOST_AUTO_TEST_CASE(verify_rejects_signature_from_wrong_key)
     const uint256 legitimateId = StakeValidatorIdFromPubKey(legitimateKey.GetPubKey());
 
     BOOST_CHECK(!VerifyStakeCommitment(forged, signingHash, legitimateId));
+}
+
+BOOST_AUTO_TEST_CASE(signing_hash_ignores_the_commitment_output)
+{
+    CKey key;
+    key.MakeNewKey(true);
+
+    const CBlock withoutCommitment = MakeTestBlock("same-block");
+    const uint256 hashBefore = ComputeStakeSigningHash(withoutCommitment);
+
+    const StakeCommitment commitment = MakeSignedCommitment(key, 0, hashBefore);
+    const CBlock withCommitment = MakeTestBlock("same-block", &commitment);
+    const uint256 hashAfter = ComputeStakeSigningHash(withCommitment);
+
+    // The whole point of stripping the commitment output before hashing:
+    // adding it must not change what gets signed/verified against.
+    BOOST_CHECK_EQUAL(hashBefore.ToString(), hashAfter.ToString());
+    // Sanity: the commitment output really did change the block's actual
+    // merkle root / GetHash() — this isn't passing merely because the two
+    // blocks ended up identical.
+    BOOST_CHECK(withoutCommitment.GetHash() != withCommitment.GetHash());
+}
+
+BOOST_AUTO_TEST_CASE(signing_hash_reflects_real_content_changes)
+{
+    const uint256 hashA = ComputeStakeSigningHash(MakeTestBlock("tag-a"));
+    const uint256 hashB = ComputeStakeSigningHash(MakeTestBlock("tag-b"));
+    BOOST_CHECK(hashA != hashB); // not an accidental constant
+}
+
+BOOST_AUTO_TEST_CASE(full_round_trip_sign_commit_recompute_verify)
+{
+    CKey key;
+    key.MakeNewKey(true);
+
+    const CBlock building = MakeTestBlock("round-trip");
+    const uint256 signingHash = ComputeStakeSigningHash(building);
+    const StakeCommitment commitment = MakeSignedCommitment(key, 0, signingHash);
+
+    const CBlock assembled = MakeTestBlock("round-trip", &commitment);
+
+    // A validating node's view: pull the commitment back out of the received
+    // block, recompute the signing hash the same way, and verify.
+    StakeCommitment parsed;
+    BOOST_REQUIRE(FindStakeCommitment(assembled.vtx[0]->vout, parsed));
+    const uint256 recomputedHash = ComputeStakeSigningHash(assembled);
+    BOOST_CHECK_EQUAL(recomputedHash.ToString(), signingHash.ToString());
+
+    const uint256 expectedId = StakeValidatorIdFromPubKey(key.GetPubKey());
+    BOOST_CHECK(VerifyStakeCommitment(parsed, recomputedHash, expectedId));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
