@@ -42,11 +42,16 @@ struct StakeCandidate {
 //! `seedHash` (the previous block's hash, or its `attempt`-th fallback
 //! derivation — see DeriveFallbackSeed below) as the sole source of
 //! randomness. Returns candidates.size() if `candidates` is empty or all
-//! weights are zero (caller must treat that as "no eligible validator").
+//! weights are non-positive (caller must treat that as "no eligible
+//! validator").
 //!
-//! Same seedHash + same candidate list (same order, same weights) always
-//! yields the same result on every node — this is what makes the selection
-//! independently verifiable rather than something any single party reveals.
+//! The result does NOT depend on the order `candidates` is passed in —
+//! internally, candidates are walked in a canonical order (ascending by
+//! `id`) before the weighted draw, so callers on different nodes can never
+//! diverge just because they assembled the vector differently. Same
+//! seedHash + same (id, weight) set always yields the same winner on every
+//! node — this is what makes the selection independently verifiable rather
+//! than something any single party reveals.
 size_t SelectStakeValidator(const uint256& seedHash, const std::vector<StakeCandidate>& candidates);
 
 //! Liveness fallback (spec §6.2): if the validator selected with the block's

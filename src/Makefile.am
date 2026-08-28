@@ -235,6 +235,7 @@ BITCOIN_CORE_H = \
   pow.h \
   protocol.h \
   psbt.h \
+  qtrn/stake_selection.h \
   random.h \
   randomenv.h \
   reverse_iterator.h \
@@ -374,6 +375,7 @@ libbitcoin_server_a_SOURCES = \
   policy/rbf.cpp \
   policy/settings.cpp \
   pow.cpp \
+  qtrn/stake_selection.cpp \
   rest.cpp \
   rpc/blockchain.cpp \
   rpc/mining.cpp \
