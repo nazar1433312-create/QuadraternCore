@@ -46,8 +46,11 @@ size_t SelectStakeValidator(const uint256& seedHash, const std::vector<StakeCand
     if (totalWeight == 0) return candidates.size(); // no positively-weighted candidate
 
     // seedHash is the sole source of randomness; reduce it into [0, totalWeight)
-    // to get this round's winning ticket.
-    const arith_uint256 ticket = UintToArith256(seedHash) % totalWeight;
+    // to get this round's winning ticket. arith_uint256 has no operator% (only
+    // */ and /=), so compute it via the standard identity a % b = a - (a/b)*b —
+    // exact here since base_uint division is unsigned truncating division.
+    const arith_uint256 rand = UintToArith256(seedHash);
+    const arith_uint256 ticket = rand - (rand / totalWeight) * totalWeight;
 
     arith_uint256 cumulative = 0;
     for (const auto* c : ordered) {
