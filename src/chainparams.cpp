@@ -50,10 +50,16 @@ static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesi
  *     CTxOut(nValue=50.00000000, scriptPubKey=0x5F1DF16B2B704C8A578D0B)
  *   vMerkleTree: 4a5e1e
  */
+// Kept at stock Litecoin values on purpose: CTestNetParams and CRegTestParams
+// below also call this overload for their own (unrelated) genesis blocks, and
+// their hardcoded hashGenesisBlock/hashMerkleRoot asserts still expect the
+// original upstream pszTimestamp/genesisOutputScript. CMainParams (the actual
+// Quadratern chain) calls the other overload directly with its own values
+// instead of changing this shared default — see its genesis block below.
 static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
-    const char* pszTimestamp = "Quadratern 27/Aug/2026 - four-way consensus: ASIC+GPU+CPU+Stake";
-    const CScript genesisOutputScript = CScript() << ParseHex("0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8") << OP_CHECKSIG;
+    const char* pszTimestamp = "NY Times 05/Oct/2011 Steve Jobs, Apple\xe2\x80\x99s Visionary, Dies at 56";
+    const CScript genesisOutputScript = CScript() << ParseHex("040184710fa689ad5023690c80f3a49c8f13f8d45b8c857fbcbc8bc4a8e4d3eb4b10f4d4604fa08dce601aaf0f470216fe1b51850b4acf21b179c45070ac7b03a9") << OP_CHECKSIG;
     return CreateGenesisBlock(pszTimestamp, genesisOutputScript, nTime, nNonce, nBits, nVersion, genesisReward);
 }
 
@@ -129,7 +135,10 @@ public:
         m_assumed_blockchain_size = 1;
         m_assumed_chain_state_size = 1;
 
-        genesis = CreateGenesisBlock(1798348800, 13755, 0x1f00ffff, 1, 100 * COIN);
+        genesis = CreateGenesisBlock(
+            "Quadratern 27/Aug/2026 - four-way consensus: ASIC+GPU+CPU+Stake",
+            CScript() << ParseHex("0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8") << OP_CHECKSIG,
+            1798348800, 13755, 0x1f00ffff, 1, 100 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
         assert(consensus.hashGenesisBlock == uint256S("0x00007595a9759d82197e167bc39a53a16bf478664962a4af5398bfb523feb4c5"));
         assert(genesis.hashMerkleRoot == uint256S("0xfbdee381a06c91598b3f7b9f55822b13bc484463032a6914428a5ecc0a7127ea"));
