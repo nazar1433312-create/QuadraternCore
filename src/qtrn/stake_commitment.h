@@ -26,7 +26,7 @@ namespace qtrn {
 // distinct from Litecoin/Bitcoin's own SegWit witness-commitment marker
 // (0xaa 0x21 0xa9 0xed) so both can coexist in the same coinbase transaction
 // (this chain activates segwit from genesis — see chainparams.cpp).
-inline constexpr unsigned char STAKE_COMMITMENT_MAGIC[4] = {0x51, 0x53, 0x54, 0x53}; // "QSTS"
+static constexpr unsigned char STAKE_COMMITMENT_MAGIC[4] = {0x51, 0x53, 0x54, 0x53}; // "QSTS"
 
 //! Everything a node needs to check that the correct PoS validator signed off
 //! on this block. Carried as a single OP_RETURN output in the block's
