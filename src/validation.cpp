@@ -3731,7 +3731,14 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
  */
 static bool CheckStakeCommitment(const CBlock& block, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, BlockValidationState& state);
 
-static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
+// fCheckStakeCommitment=false lets BlockAssembler::CreateNewBlock's internal
+// TestBlockValidity self-check pass on a bare template — the PoS validator's
+// signature is added by the miner in a separate step *after* CreateNewBlock
+// returns (spec §6.2: it requires waiting on an external party, unlike
+// SegWit's witness commitment, which the miner can always self-compute
+// immediately and therefore embeds before this self-check ever runs). Real
+// block acceptance (AcceptBlock) always uses the default (true).
+static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, bool fCheckStakeCommitment = true)
 {
     const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
 
@@ -3814,7 +3821,7 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
         return false;
     }
 
-    if (!CheckStakeCommitment(block, consensusParams, pindexPrev, state)) {
+    if (fCheckStakeCommitment && !CheckStakeCommitment(block, consensusParams, pindexPrev, state)) {
         return false;
     }
 
@@ -4115,7 +4122,7 @@ bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const s
     return true;
 }
 
-bool TestBlockValidity(BlockValidationState& state, const CChainParams& chainparams, const CBlock& block, CBlockIndex* pindexPrev, bool fCheckPOW, bool fCheckMerkleRoot)
+bool TestBlockValidity(BlockValidationState& state, const CChainParams& chainparams, const CBlock& block, CBlockIndex* pindexPrev, bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckStakeCommitment)
 {
     AssertLockHeld(cs_main);
     assert(pindexPrev && pindexPrev == ::ChainActive().Tip());
@@ -4131,7 +4138,7 @@ bool TestBlockValidity(BlockValidationState& state, const CChainParams& chainpar
         return error("%s: Consensus::ContextualCheckBlockHeader: %s", __func__, state.ToString());
     if (!CheckBlock(block, state, chainparams.GetConsensus(), fCheckPOW, fCheckMerkleRoot))
         return error("%s: Consensus::CheckBlock: %s", __func__, state.ToString());
-    if (!ContextualCheckBlock(block, state, chainparams.GetConsensus(), pindexPrev))
+    if (!ContextualCheckBlock(block, state, chainparams.GetConsensus(), pindexPrev, fCheckStakeCommitment))
         return error("%s: Consensus::ContextualCheckBlock: %s", __func__, state.ToString());
     if (!::ChainstateActive().ConnectBlock(block, state, &indexDummy, viewNew, chainparams, true))
         return false;
