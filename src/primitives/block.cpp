@@ -6,6 +6,7 @@
 #include <primitives/block.h>
 
 #include <hash.h>
+#include <qtrn/algo_hash.h>
 #include <tinyformat.h>
 #include <util/strencodings.h>
 #include <crypto/common.h>
@@ -15,13 +16,14 @@ uint256 CBlockHeader::GetHash() const
     return SerializeHash(*this);
 }
 
-// testnet-1: single-algo PoW (SHA-256d), matching cycle-1 of the Quadratern
-// emission schedule. testnet-2 replaces this with per-algorithm dispatch
-// (SHA-256 / ProgPoW / RandomX) selected by a header-encoded algo id.
-// See ROADMAP.md.
+// testnet-2: dispatches to SHA-256 / ProgPoW / RandomX per the algo id
+// encoded in nVersion (qtrn::GetPowAlgo) — see qtrn/algo_hash.h. ProgPoW and
+// RandomX are still placeholder stubs there, not the real algorithms (see
+// PROGRESS-testnet-2.md); this dispatch point doesn't need to change again
+// once the real libraries are vendored in.
 uint256 CBlockHeader::GetPoWHash() const
 {
-    return SerializeHash(*this);
+    return qtrn::ComputeAlgoHash(*this);
 }
 
 std::string CBlock::ToString() const

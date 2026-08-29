@@ -235,10 +235,8 @@ BITCOIN_CORE_H = \
   pow.h \
   protocol.h \
   psbt.h \
-  qtrn/algo_hash.h \
   qtrn/genesis_stakers.h \
   qtrn/local_stake_signer.h \
-  qtrn/pow_algo.h \
   qtrn/staked_block.h \
   qtrn/stake_commitment.h \
   qtrn/stake_pool.h \
@@ -382,10 +380,8 @@ libbitcoin_server_a_SOURCES = \
   policy/rbf.cpp \
   policy/settings.cpp \
   pow.cpp \
-  qtrn/algo_hash.cpp \
   qtrn/genesis_stakers.cpp \
   qtrn/local_stake_signer.cpp \
-  qtrn/pow_algo.cpp \
   qtrn/staked_block.cpp \
   qtrn/stake_commitment.cpp \
   qtrn/stake_pool.cpp \
@@ -548,6 +544,10 @@ libbitcoin_consensus_a_SOURCES = \
   primitives/transaction.h \
   pubkey.cpp \
   pubkey.h \
+  qtrn/algo_hash.cpp \
+  qtrn/algo_hash.h \
+  qtrn/pow_algo.cpp \
+  qtrn/pow_algo.h \
   script/bitcoinconsensus.cpp \
   script/interpreter.cpp \
   script/interpreter.h \
