@@ -23,6 +23,7 @@
 #include <script/script.h>
 #include <test/util/setup_common.h>
 #include <txmempool.h>
+#include <util/check.h>
 #include <validation.h>
 
 #include <boost/test/unit_test.hpp>
@@ -45,7 +46,7 @@ CKey KeyFromHex(const std::string& hex)
 // optionally appends a stake commitment, mines real PoW for it, and submits
 // it through the real ProcessNewBlock path. Returns whether the tip advanced
 // to this block — the actual thing CheckStakeCommitment is supposed to gate.
-bool BuildAndSubmit(const StakeCommitment* commitment)
+bool BuildAndSubmit(ChainstateManager& chainman, const StakeCommitment* commitment)
 {
     const CChainParams& chainparams = Params();
     CTxMemPool emptyPool;
@@ -66,7 +67,7 @@ bool BuildAndSubmit(const StakeCommitment* commitment)
 
     const uint256 tipBefore = ::ChainActive().Tip()->GetBlockHash();
     auto shared_pblock = std::make_shared<const CBlock>(block);
-    Assert(m_node.chainman)->ProcessNewBlock(chainparams, shared_pblock, /*fForceProcessing=*/true, nullptr);
+    chainman.ProcessNewBlock(chainparams, shared_pblock, /*fForceProcessing=*/true, nullptr);
     const uint256 tipAfter = ::ChainActive().Tip()->GetBlockHash();
 
     return tipAfter == block.GetHash() && tipAfter != tipBefore;
@@ -76,7 +77,7 @@ bool BuildAndSubmit(const StakeCommitment* commitment)
 
 BOOST_AUTO_TEST_CASE(block_with_no_stake_commitment_is_rejected)
 {
-    BOOST_CHECK(!BuildAndSubmit(nullptr));
+    BOOST_CHECK(!BuildAndSubmit(*Assert(m_node.chainman), nullptr));
 }
 
 BOOST_AUTO_TEST_CASE(block_with_wrong_signature_is_rejected)
@@ -94,7 +95,7 @@ BOOST_AUTO_TEST_CASE(block_with_wrong_signature_is_rejected)
     bogus.validatorPubKey = wrongKey.GetPubKey();
     BOOST_REQUIRE(wrongKey.Sign(uint256S("deadbeef"), bogus.signature)); // signs the wrong hash on top of being the wrong key
 
-    BOOST_CHECK(!BuildAndSubmit(&bogus));
+    BOOST_CHECK(!BuildAndSubmit(*Assert(m_node.chainman), &bogus));
 }
 
 BOOST_AUTO_TEST_CASE(block_with_valid_commitment_is_accepted)
@@ -143,7 +144,7 @@ BOOST_AUTO_TEST_CASE(block_with_valid_commitment_is_accepted)
     commitment.validatorPubKey = keys[0].GetPubKey();
     BOOST_REQUIRE(keys[0].Sign(signingHash, commitment.signature));
 
-    BOOST_CHECK(BuildAndSubmit(&commitment));
+    BOOST_CHECK(BuildAndSubmit(*Assert(m_node.chainman), &commitment));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
