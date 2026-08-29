@@ -42,17 +42,26 @@ CKey KeyFromHex(const std::string& hex)
     return key;
 }
 
-// Mines a block template on the current tip via the real BlockAssembler,
-// optionally appends a stake commitment, mines real PoW for it, and submits
-// it through the real ProcessNewBlock path. Returns whether the tip advanced
-// to this block — the actual thing CheckStakeCommitment is supposed to gate.
-bool BuildAndSubmit(ChainstateManager& chainman, const StakeCommitment* commitment)
+// One fresh template on the current tip, exactly the way the real miner
+// would build it (BlockAssembler + RegenerateCommitments), before any stake
+// commitment is attached. Every test builds exactly one of these and reuses
+// it for both signing and submission — building two separate templates and
+// expecting their signing hashes to match is not safe: BlockAssembler picks
+// nTime from wall-clock time, which can tick between two separate calls.
+CBlock MakeTemplate()
 {
-    const CChainParams& chainparams = Params();
     CTxMemPool emptyPool;
-    CBlock block = BlockAssembler(emptyPool, chainparams).CreateNewBlock(CScript() << OP_TRUE)->block;
+    CBlock block = BlockAssembler(emptyPool, Params()).CreateNewBlock(CScript() << OP_TRUE)->block;
     RegenerateCommitments(block);
+    return block;
+}
 
+// Optionally attaches `commitment` to `block`'s coinbase, mines real PoW for
+// it, and submits it through the real ProcessNewBlock path. Returns whether
+// the tip advanced to this block — the actual thing CheckStakeCommitment is
+// supposed to gate.
+bool Submit(ChainstateManager& chainman, CBlock block, const StakeCommitment* commitment)
+{
     if (commitment) {
         CMutableTransaction coinbase(*block.vtx[0]);
         coinbase.vout.emplace_back(0, BuildStakeCommitmentScript(*commitment));
@@ -61,13 +70,14 @@ bool BuildAndSubmit(ChainstateManager& chainman, const StakeCommitment* commitme
         block.hashMerkleRoot = BlockMerkleRoot(block);
     }
 
-    while (!CheckProofOfWork(block.GetPoWHash(), block.nBits, chainparams.GetConsensus())) {
+    const Consensus::Params& consensus = Params().GetConsensus();
+    while (!CheckProofOfWork(block.GetPoWHash(), block.nBits, consensus)) {
         ++block.nNonce;
     }
 
     const uint256 tipBefore = ::ChainActive().Tip()->GetBlockHash();
     auto shared_pblock = std::make_shared<const CBlock>(block);
-    chainman.ProcessNewBlock(chainparams, shared_pblock, /*fForceProcessing=*/true, nullptr);
+    chainman.ProcessNewBlock(Params(), shared_pblock, /*fForceProcessing=*/true, nullptr);
     const uint256 tipAfter = ::ChainActive().Tip()->GetBlockHash();
 
     return tipAfter == block.GetHash() && tipAfter != tipBefore;
@@ -77,7 +87,7 @@ bool BuildAndSubmit(ChainstateManager& chainman, const StakeCommitment* commitme
 
 BOOST_AUTO_TEST_CASE(block_with_no_stake_commitment_is_rejected)
 {
-    BOOST_CHECK(!BuildAndSubmit(*Assert(m_node.chainman), nullptr));
+    BOOST_CHECK(!Submit(*Assert(m_node.chainman), MakeTemplate(), nullptr));
 }
 
 BOOST_AUTO_TEST_CASE(block_with_wrong_signature_is_rejected)
@@ -86,16 +96,16 @@ BOOST_AUTO_TEST_CASE(block_with_wrong_signature_is_rejected)
     BOOST_REQUIRE(!stakers.empty());
 
     // A validly-formed commitment, but signed by a key that isn't the
-    // selected validator for this seed/attempt at all.
+    // selected validator for this seed/attempt at all, over an unrelated hash.
     CKey wrongKey;
     wrongKey.MakeNewKey(true);
 
     StakeCommitment bogus;
     bogus.attempt = 0;
     bogus.validatorPubKey = wrongKey.GetPubKey();
-    BOOST_REQUIRE(wrongKey.Sign(uint256S("deadbeef"), bogus.signature)); // signs the wrong hash on top of being the wrong key
+    BOOST_REQUIRE(wrongKey.Sign(uint256S("deadbeef"), bogus.signature));
 
-    BOOST_CHECK(!BuildAndSubmit(*Assert(m_node.chainman), &bogus));
+    BOOST_CHECK(!Submit(*Assert(m_node.chainman), MakeTemplate(), &bogus));
 }
 
 BOOST_AUTO_TEST_CASE(block_with_valid_commitment_is_accepted)
@@ -131,12 +141,9 @@ BOOST_AUTO_TEST_CASE(block_with_valid_commitment_is_accepted)
     }
     BOOST_REQUIRE(found); // ~88% odds per attempt; 20 tries is overwhelmingly enough
 
-    // Build the exact same block template CheckStakeCommitment will see, to
-    // compute the same signing hash it will recompute during validation.
-    const CChainParams& chainparams = Params();
-    CTxMemPool emptyPool;
-    CBlock block = BlockAssembler(emptyPool, chainparams).CreateNewBlock(CScript() << OP_TRUE)->block;
-    RegenerateCommitments(block);
+    // Build exactly one template, sign against its own signing hash, then
+    // submit that same object (see MakeTemplate's comment).
+    const CBlock block = MakeTemplate();
     const uint256 signingHash = ComputeStakeSigningHash(block);
 
     StakeCommitment commitment;
@@ -144,7 +151,7 @@ BOOST_AUTO_TEST_CASE(block_with_valid_commitment_is_accepted)
     commitment.validatorPubKey = keys[0].GetPubKey();
     BOOST_REQUIRE(keys[0].Sign(signingHash, commitment.signature));
 
-    BOOST_CHECK(BuildAndSubmit(*Assert(m_node.chainman), &commitment));
+    BOOST_CHECK(Submit(*Assert(m_node.chainman), block, &commitment));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
