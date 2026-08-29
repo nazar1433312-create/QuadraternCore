@@ -138,9 +138,18 @@ public:
         genesis = CreateGenesisBlock(
             "Quadratern 27/Aug/2026 - four-way consensus: ASIC+GPU+CPU+Stake",
             CScript() << ParseHex("0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8") << OP_CHECKSIG,
-            1798348800, 13755, 0x1f00ffff, 1, 100 * COIN);
+            1787788800, 61421, 0x1f00ffff, 1, 100 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x00007595a9759d82197e167bc39a53a16bf478664962a4af5398bfb523feb4c5"));
+        // nTime fixed 2026: original value (1798348800) decoded to 27 Dec
+        // 2026, ~4 months later than the "27/Aug/2026" the coinbase message
+        // and pszTimestamp actually claim — an arithmetic slip when it was
+        // first computed, only surfaced once a test tried to build a block
+        // on top of genesis and hit "block timestamp too far in the future"
+        // (real time hadn't caught up to the bogus genesis time yet).
+        // Corrected to the real 27 Aug 2026 00:00 UTC (1787788800) and
+        // re-mined for a valid nNonce; merkle root is unaffected (it only
+        // depends on the coinbase tx, not nTime).
+        assert(consensus.hashGenesisBlock == uint256S("0x0000c56a0253cc18379818a872c43616eb3d99149dfa30e9d98cc5ffc3700ac5"));
         assert(genesis.hashMerkleRoot == uint256S("0xfbdee381a06c91598b3f7b9f55822b13bc484463032a6914428a5ecc0a7127ea"));
 
         // testnet-1 scope decision (PROGRESS.md): fixed genesis staker set
