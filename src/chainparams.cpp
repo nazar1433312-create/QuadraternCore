@@ -143,6 +143,20 @@ public:
         assert(consensus.hashGenesisBlock == uint256S("0x00007595a9759d82197e167bc39a53a16bf478664962a4af5398bfb523feb4c5"));
         assert(genesis.hashMerkleRoot == uint256S("0xfbdee381a06c91598b3f7b9f55822b13bc484463032a6914428a5ecc0a7127ea"));
 
+        // testnet-1 scope decision (PROGRESS.md): fixed genesis staker set
+        // instead of a full address-balance index. Throwaway secp256k1 test
+        // keys, zero real value — private keys documented in
+        // contrib/testnet1-genesis-stakers.md for local test mining/staking,
+        // never to be reused for anything beyond this testnet.
+        // staker 1: 500 QTRN (solo-eligible, >= SOLO_STAKE_MINIMUM)
+        // staker 2:  30 QTRN ) both pool together via DeterministicPoolId,
+        // staker 3:  40 QTRN ) exercising the pooled path with real chain data
+        consensus.genesisStakers = {
+            {CPubKey(ParseHex("027de7a74750f99a7d861170c0bacd63ed64ecfee2129913c08260fb7ea6c833b3")), 500 * COIN},
+            {CPubKey(ParseHex("02b47087004663b4ec0aa263a19c90e1992b929847d3a5ce34bb9db79ce7d78016")),  30 * COIN},
+            {CPubKey(ParseHex("0398cc9ca0159dbbcc52f7fa73a622a2a517ba29c808211625d6a4c8cbb2de9c06")),  40 * COIN},
+        };
+
         // No DNS seed infrastructure yet — testnet-1 bootstraps via the SEED
         // node's peer-list distribution (see spec §7/§9), not DNS seeds.
         vSeeds.clear();

@@ -257,6 +257,7 @@ BITCOIN_TESTS =\
   test/policyestimator_tests.cpp \
   test/pow_tests.cpp \
   test/prevector_tests.cpp \
+  test/qtrn_genesis_stakers_tests.cpp \
   test/qtrn_stake_commitment_tests.cpp \
   test/qtrn_stake_pool_tests.cpp \
   test/qtrn_stake_selection_tests.cpp \

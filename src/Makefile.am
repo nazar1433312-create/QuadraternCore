@@ -235,6 +235,7 @@ BITCOIN_CORE_H = \
   pow.h \
   protocol.h \
   psbt.h \
+  qtrn/genesis_stakers.h \
   qtrn/stake_commitment.h \
   qtrn/stake_pool.h \
   qtrn/stake_selection.h \
@@ -377,6 +378,7 @@ libbitcoin_server_a_SOURCES = \
   policy/rbf.cpp \
   policy/settings.cpp \
   pow.cpp \
+  qtrn/genesis_stakers.cpp \
   qtrn/stake_commitment.cpp \
   qtrn/stake_pool.cpp \
   qtrn/stake_selection.cpp \
