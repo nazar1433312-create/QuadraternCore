@@ -151,6 +151,25 @@ BOOST_AUTO_TEST_CASE(block_with_valid_commitment_is_accepted)
     commitment.validatorPubKey = keys[0].GetPubKey();
     BOOST_REQUIRE(keys[0].Sign(signingHash, commitment.signature));
 
+    // Diagnostic: run the exact same checks ProcessNewBlock will, but
+    // synchronously with a BlockValidationState we can inspect, so a failure
+    // here names the specific rule that rejected the block instead of a bare
+    // true/false.
+    {
+        CMutableTransaction coinbase(*block.vtx[0]);
+        coinbase.vout.emplace_back(0, BuildStakeCommitmentScript(commitment));
+        CBlock checkBlock = block;
+        checkBlock.vtx[0] = MakeTransactionRef(std::move(coinbase));
+        checkBlock.hashMerkleRoot = BlockMerkleRoot(checkBlock);
+        while (!CheckProofOfWork(checkBlock.GetPoWHash(), checkBlock.nBits, Params().GetConsensus())) {
+            ++checkBlock.nNonce;
+        }
+        LOCK(cs_main);
+        BlockValidationState state;
+        bool ok = TestBlockValidity(state, Params(), checkBlock, ::ChainActive().Tip(), true, true, true);
+        BOOST_TEST_MESSAGE("TestBlockValidity: " << ok << " state: " << state.ToString());
+    }
+
     BOOST_CHECK(Submit(*Assert(m_node.chainman), block, &commitment));
 }
 
