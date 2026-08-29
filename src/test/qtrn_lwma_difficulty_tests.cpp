@@ -24,6 +24,16 @@ uint32_t BaseCompact()
     return UintToArith256(POW_LIMIT).GetCompact();
 }
 
+// A target with headroom below POW_LIMIT, for tests that need to loosen
+// (grow) the target — starting from POW_LIMIT itself leaves no room to
+// loosen further and would just re-test the ceiling clamp instead of the
+// +15% step clamp. Round-tripped through compact so it's internally
+// consistent the same way BaseCompact() is.
+uint32_t HeadroomCompact()
+{
+    return arith_uint256(UintToArith256(POW_LIMIT) >> 2).GetCompact();
+}
+
 std::vector<AlgoBlockSample> MakeSamples(int64_t startTime, int64_t solveTime, size_t count, uint32_t nBits = 0)
 {
     if (nBits == 0) nBits = BaseCompact();
@@ -79,8 +89,13 @@ BOOST_AUTO_TEST_CASE(on_target_solve_times_leave_difficulty_roughly_unchanged)
 BOOST_AUTO_TEST_CASE(consistently_slow_blocks_loosen_the_target_up_to_the_clamp)
 {
     // Blocks taking far longer than target => target should grow (easier),
-    // clamped to at most +15% versus the last sample's own target.
-    const auto samples = MakeSamples(1000, TARGET_SPACING * 20, 30);
+    // clamped to at most +15% versus the last sample's own target. Uses
+    // HeadroomCompact() rather than BaseCompact() — a last-sample target
+    // that already sits AT powLimit has zero room to loosen further (the
+    // absolute ceiling clamp would legitimately hold nextTarget == lastTarget,
+    // which isn't what this test is meant to exercise; that ceiling behavior
+    // has its own dedicated test below).
+    const auto samples = MakeSamples(1000, TARGET_SPACING * 20, 30, HeadroomCompact());
     const uint32_t next = LwmaNextTarget(samples, TARGET_SPACING, POW_LIMIT);
     const arith_uint256 nextTarget = ToTarget(next);
     const arith_uint256 lastTarget = ToTarget(samples.back().nBits);
@@ -101,7 +116,15 @@ BOOST_AUTO_TEST_CASE(consistently_fast_blocks_tighten_the_target_up_to_the_clamp
 
     BOOST_CHECK(nextTarget < lastTarget); // did tighten
     const arith_uint256 maxDown = lastTarget - (lastTarget * arith_uint256(LWMA_MAX_DECREASE_PERCENT)) / arith_uint256(100);
-    BOOST_CHECK(nextTarget >= maxDown); // never past the clamp
+    // The returned target went through a GetCompact()/SetCompact() round
+    // trip inside LwmaNextTarget (as every real target does — that's the
+    // 32-bit on-the-wire difficulty format), which keeps only ~3
+    // significant bytes and so loses a little precision versus maxDown
+    // computed here directly on the full-width arith_uint256. Allow a
+    // tolerance well above that rounding noise (observed ~0.003%) but far
+    // below the 10% clamp band itself, so this still meaningfully checks
+    // the clamp held rather than just disabling the check.
+    BOOST_CHECK(nextTarget >= maxDown - maxDown / 1000); // never past the clamp (within compact-rounding slack)
 }
 
 BOOST_AUTO_TEST_CASE(never_exceeds_powlimit_even_when_the_math_wants_looser)
