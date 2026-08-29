@@ -152,40 +152,12 @@ BOOST_AUTO_TEST_CASE(block_with_valid_commitment_is_accepted)
     commitment.validatorPubKey = keys[0].GetPubKey();
     BOOST_REQUIRE(keys[0].Sign(signingHash, commitment.signature));
 
-    // Diagnostic: run the exact same checks ProcessNewBlock will, but
-    // synchronously with a BlockValidationState we can inspect, so a failure
-    // here names the specific rule that rejected the block instead of a bare
-    // true/false.
-    {
-        CMutableTransaction coinbase(*block.vtx[0]);
-        coinbase.vout.emplace_back(0, BuildStakeCommitmentScript(commitment));
-        CBlock checkBlock = block;
-        checkBlock.vtx[0] = MakeTransactionRef(std::move(coinbase));
-        checkBlock.hashMerkleRoot = BlockMerkleRoot(checkBlock);
-
-        const uint256 recomputedHash = ComputeStakeSigningHash(checkBlock);
-        BOOST_TEST_MESSAGE("signed hash:     " << signingHash.ToString());
-        BOOST_TEST_MESSAGE("recomputed hash: " << recomputedHash.ToString());
-        BOOST_TEST_MESSAGE("hashes equal: " << (recomputedHash == signingHash));
-
-        StakeCommitment parsedBack;
-        bool foundBack = FindStakeCommitment(checkBlock.vtx[0]->vout, parsedBack);
-        BOOST_TEST_MESSAGE("re-parsed commitment found: " << foundBack);
-        if (foundBack) {
-            BOOST_TEST_MESSAGE("re-parsed pubkey matches: " << (parsedBack.validatorPubKey == commitment.validatorPubKey));
-            BOOST_TEST_MESSAGE("re-parsed attempt: " << parsedBack.attempt << " (expected " << commitment.attempt << ")");
-            BOOST_TEST_MESSAGE("direct verify against signingHash: " << VerifyStakeCommitment(parsedBack, signingHash, StakeValidatorIdFromPubKey(commitment.validatorPubKey)));
-            BOOST_TEST_MESSAGE("direct verify against recomputedHash: " << VerifyStakeCommitment(parsedBack, recomputedHash, StakeValidatorIdFromPubKey(commitment.validatorPubKey)));
-        }
-
-        while (!CheckProofOfWork(checkBlock.GetPoWHash(), checkBlock.nBits, Params().GetConsensus())) {
-            ++checkBlock.nNonce;
-        }
-        LOCK(cs_main);
-        BlockValidationState state;
-        bool ok = TestBlockValidity(state, Params(), checkBlock, ::ChainActive().Tip(), true, true, true);
-        BOOST_TEST_MESSAGE("TestBlockValidity: " << ok << " state: " << state.ToString());
-    }
+    // Regression check for the bug this test caught: PoW mining (which
+    // happens after the commitment is attached, and changes nNonce) must
+    // never invalidate a signature made against the pre-mining signing hash.
+    CBlock noncedCopy = block;
+    noncedCopy.nNonce = 424242;
+    BOOST_CHECK_EQUAL(ComputeStakeSigningHash(noncedCopy).ToString(), signingHash.ToString());
 
     BOOST_CHECK(Submit(*Assert(m_node.chainman), block, &commitment));
 }

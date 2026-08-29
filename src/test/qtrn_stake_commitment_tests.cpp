@@ -211,6 +211,21 @@ BOOST_AUTO_TEST_CASE(signing_hash_reflects_real_content_changes)
     BOOST_CHECK(hashA != hashB); // not an accidental constant
 }
 
+// Regression test: PoW mining happens after the commitment is attached and
+// changes nNonce — a signature made against the pre-mining signing hash must
+// still verify after. An earlier version of ComputeStakeSigningHash hashed
+// the block's real nNonce, so a signature made before mining silently
+// stopped verifying the moment mining changed it — only caught once a test
+// exercised real PoW mining instead of a hardcoded nNonce=0 in every block.
+BOOST_AUTO_TEST_CASE(signing_hash_ignores_nonce)
+{
+    CBlock block = MakeTestBlock("nonce-independence");
+    const uint256 hashAtZero = ComputeStakeSigningHash(block);
+    block.nNonce = 424242;
+    const uint256 hashAfterMining = ComputeStakeSigningHash(block);
+    BOOST_CHECK_EQUAL(hashAtZero.ToString(), hashAfterMining.ToString());
+}
+
 BOOST_AUTO_TEST_CASE(full_round_trip_sign_commit_recompute_verify)
 {
     CKey key;

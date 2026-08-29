@@ -99,6 +99,13 @@ uint256 StakeValidatorIdFromPubKey(const CPubKey& pubKey);
 //! on the fully assembled block it received (commitment present, now
 //! stripped back out) to get the same hash back, to check against the
 //! signature it found via FindStakeCommitment.
+//!
+//! Also zeroes `nNonce` before hashing — the nonce is found by PoW mining,
+//! which can happen before or after the commitment is attached, and either
+//! way the validator isn't vouching for a specific nonce (PoW itself already
+//! secures that). Signing over the real, possibly-not-yet-found nonce would
+//! mean a signature made before mining finished stopped verifying the moment
+//! mining changed it.
 uint256 ComputeStakeSigningHash(const CBlock& block);
 
 } // namespace qtrn

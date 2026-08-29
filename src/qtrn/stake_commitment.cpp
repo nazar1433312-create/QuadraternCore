@@ -113,6 +113,15 @@ uint256 ComputeStakeSigningHash(const CBlock& block)
 
     CBlockHeader header(block.GetBlockHeader());
     header.hashMerkleRoot = ComputeMerkleRoot(std::move(leaves));
+    // nNonce is found by PoW mining, which can happen either before or after
+    // the commitment is attached (mining before: the nonce that was valid for
+    // the pre-commitment merkle root is no longer valid once the commitment
+    // changes it, so it gets re-mined anyway; mining after: nNonce simply
+    // isn't known yet at signing time). Either way the validator isn't
+    // vouching for a specific nonce — PoW itself already secures that — so it
+    // must not be part of what gets signed, or a signature made before the
+    // final nonce was found would silently stop verifying once one was.
+    header.nNonce = 0;
     return header.GetHash();
 }
 
