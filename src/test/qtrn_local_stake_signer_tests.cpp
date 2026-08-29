@@ -6,11 +6,17 @@
 
 #include <qtrn/stake_commitment.h>
 
+#include <test/util/setup_common.h>
+
 #include <boost/test/unit_test.hpp>
 
 using namespace qtrn;
 
-BOOST_AUTO_TEST_SUITE(qtrn_local_stake_signer_tests)
+// CKey::MakeNewKey/Sign and CPubKey::Verify need the secp256k1 signing
+// context, which BasicTestingSetup's constructor initializes via ECC_Start()
+// — without it this crashes (seen as SIGABRT or a segfault depending on
+// exactly which secp256k1 call hits the uninitialized context first).
+BOOST_FIXTURE_TEST_SUITE(qtrn_local_stake_signer_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_signer_has_no_keys)
 {
