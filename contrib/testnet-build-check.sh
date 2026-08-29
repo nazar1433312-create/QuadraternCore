@@ -42,4 +42,4 @@ cd /repo
 # libraries — building just this target is cheaper than a full `make`).
 make -j6 -C src test/test_litecoin
 echo "=== RUNNING qtrn_* SUITES ONLY (not the full upstream suite) ==="
-./src/test/test_litecoin --run_test=qtrn_stake_selection_tests,qtrn_stake_commitment_tests,qtrn_stake_pool_tests,qtrn_genesis_stakers_tests,qtrn_stake_commitment_consensus_tests,qtrn_local_stake_signer_tests,qtrn_staked_block_tests,qtrn_pow_algo_tests,qtrn_algo_hash_tests,qtrn_lwma_difficulty_tests --log_level=all
+./src/test/test_litecoin --run_test=qtrn_stake_selection_tests,qtrn_stake_commitment_tests,qtrn_stake_pool_tests,qtrn_genesis_stakers_tests,qtrn_stake_commitment_consensus_tests,qtrn_local_stake_signer_tests,qtrn_staked_block_tests,qtrn_pow_algo_tests,qtrn_algo_hash_tests,qtrn_lwma_difficulty_tests,qtrn_pow_retarget_tests --log_level=all

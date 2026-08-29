@@ -8,52 +8,69 @@
 #include <arith_uint256.h>
 #include <chain.h>
 #include <primitives/block.h>
+#include <qtrn/lwma_difficulty.h>
+#include <qtrn/pow_algo.h>
 #include <uint256.h>
+
+#include <algorithm>
+
+namespace {
+
+// Walks back from pindexLast collecting up to LWMA_WINDOW most recent blocks
+// mined with the same algo as `algo`, oldest-to-newest (LwmaNextTarget's
+// required order) — the three PoW channels race for the same chain slot
+// (spec §6.1, PROGRESS-testnet-2.md) but each retargets from its own
+// algo-only block history, never mixing in another channel's solve times.
+std::vector<qtrn::AlgoBlockSample> CollectAlgoSamples(const CBlockIndex* pindexLast, qtrn::PowAlgo algo)
+{
+    std::vector<qtrn::AlgoBlockSample> samples;
+    samples.reserve(qtrn::LWMA_WINDOW);
+    for (const CBlockIndex* pindex = pindexLast; pindex && samples.size() < qtrn::LWMA_WINDOW; pindex = pindex->pprev) {
+        if (qtrn::GetPowAlgo(pindex->nVersion) == algo) {
+            samples.push_back({pindex->GetBlockTime(), pindex->nBits});
+        }
+    }
+    std::reverse(samples.begin(), samples.end());
+    return samples;
+}
+
+} // namespace
 
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
     assert(pindexLast != nullptr);
-    unsigned int nProofOfWorkLimit = UintToArith256(params.powLimit).GetCompact();
 
-    // Only change once per difficulty adjustment interval
-    if ((pindexLast->nHeight+1) % params.DifficultyAdjustmentInterval() != 0)
-    {
-        if (params.fPowAllowMinDifficultyBlocks)
-        {
-            // Special difficulty rule for testnet:
-            // If the new block's timestamp is more than 2* 10 minutes
-            // then allow mining of a min-difficulty block.
-            if (pblock->GetBlockTime() > pindexLast->GetBlockTime() + params.nPowTargetSpacing*2)
-                return nProofOfWorkLimit;
-            else
-            {
-                // Return the last non-special-min-difficulty-rules-block
-                const CBlockIndex* pindex = pindexLast;
-                while (pindex->pprev && pindex->nHeight % params.DifficultyAdjustmentInterval() != 0 && pindex->nBits == nProofOfWorkLimit)
-                    pindex = pindex->pprev;
-                return pindex->nBits;
-            }
-        }
+    if (params.fPowNoRetargeting) {
+        // regtest: keep mining trivially cheap, no algo-aware retargeting.
         return pindexLast->nBits;
     }
 
-    // Go back by what we want to be 14 days worth of blocks
-    // Litecoin: This fixes an issue where a 51% attack can change difficulty at will.
-    // Go back the full period unless it's the first retarget after genesis. Code courtesy of Art Forz
-    int blockstogoback = params.DifficultyAdjustmentInterval()-1;
-    if ((pindexLast->nHeight+1) != params.DifficultyAdjustmentInterval())
-        blockstogoback = params.DifficultyAdjustmentInterval();
+    const qtrn::PowAlgo algo = qtrn::GetPowAlgo(pblock->nVersion);
+    // An invalid (unassigned 4th) algo id has no per-algo powLimit slot to
+    // read — fall back to the chain-wide limit rather than reading out of
+    // bounds; ContextualCheckBlockHeader rejects such a block on other
+    // grounds regardless; the caller-facing behavior of this function must
+    // still never crash on it.
+    const uint256& powLimitForAlgo = qtrn::IsValidPowAlgo(algo) ? params.PowLimitFor(algo) : params.powLimit;
 
-    // Go back by what we want to be 14 days worth of blocks
-    const CBlockIndex* pindexFirst = pindexLast;
-    for (int i = 0; pindexFirst && i < blockstogoback; i++)
-        pindexFirst = pindexFirst->pprev;
+    const auto samples = CollectAlgoSamples(pindexLast, algo);
 
-    assert(pindexFirst);
+    if (params.fPowAllowMinDifficultyBlocks && !samples.empty() &&
+        pblock->GetBlockTime() > samples.back().nTime + params.nPowTargetSpacingPerAlgo * 2) {
+        // Testnet bring-up rule, scoped to one algo's own channel: if this
+        // channel in particular has gone quiet (no miner on it right now),
+        // allow it to mine at its own floor difficulty instead of stalling
+        // that channel while the other two keep producing blocks normally.
+        return UintToArith256(powLimitForAlgo).GetCompact();
+    }
 
-    return CalculateNextWorkRequired(pindexLast, pindexFirst->GetBlockTime(), params);
+    return qtrn::LwmaNextTarget(samples, params.nPowTargetSpacingPerAlgo, powLimitForAlgo);
 }
 
+// Inherited Litecoin's fixed-interval retargeting — GetNextWorkRequired no
+// longer calls this (replaced by per-algo LWMA above); kept only because
+// test/pow_tests.cpp and test/fuzz/pow.cpp still exercise it directly
+// against the legacy formula.
 unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, int64_t nFirstBlockTime, const Consensus::Params& params)
 {
     if (params.fPowNoRetargeting)
