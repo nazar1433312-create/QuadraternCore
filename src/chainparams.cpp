@@ -333,6 +333,12 @@ public:
         consensus.defaultAssumeValid = uint256{};
         consensus.mweb_pegout_feature_activation_height = 0;
         consensus.frozen_mweb_output_ids = GetFrozenMWEBOutputIDs();
+        // consensus.genesisStakers deliberately left empty here: regtest's
+        // shared TestChain100Setup test fixture mines blocks with no stake
+        // commitment at all, which would now fail the stake-commitment rule
+        // for every one of those blocks if this were populated. Testing that
+        // rule uses CMainParams (which has real genesisStakers) directly
+        // instead — see qtrn_stake_commitment_consensus_tests.cpp.
         pchMessageStart[0] = 0xfa;
         pchMessageStart[1] = 0xbf;
         pchMessageStart[2] = 0xb5;
