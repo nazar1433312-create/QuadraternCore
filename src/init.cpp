@@ -26,6 +26,8 @@
 #include <interfaces/chain.h>
 #include <interfaces/node.h>
 #include <key.h>
+#include <qtrn/local_stake_signer.h>
+#include <util/strencodings.h>
 #include <miner.h>
 #include <net.h>
 #include <net_permissions.h>
@@ -442,6 +444,11 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-blockfilterindex=<type>",
                  strprintf("Maintain an index of compact filters by block (default: %s, values: %s).", DEFAULT_BLOCKFILTERINDEX, ListBlockFilterTypes()) +
                  " If <type> is not supplied or if <type> = 1, indexes for all known types are enabled.",
+                 ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-qtrnstakingkey=<hex>",
+                 "testnet-1 only (see PROGRESS.md): register a private key (hex) this node can locally sign PoS "
+                 "stake commitments with, if it turns out to be the selected validator. Repeatable. Throwaway "
+                 "testnet-1 genesis staker keys are documented in contrib/testnet1-genesis-stakers.md.",
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddArg("-addnode=<ip>", "Add a node to connect to and attempt to keep the connection open (see the `addnode` RPC command help for more info). This option can be specified multiple times to add multiple nodes.", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
@@ -1243,6 +1250,22 @@ bool AppInitSanityChecks()
     RandomInit();
     ECC_Start();
     globalVerifyHandle.reset(new ECCVerifyHandle());
+
+    // testnet-1 only (see PROGRESS.md / contrib/testnet1-genesis-stakers.md):
+    // load any locally-held PoS staking keys, now that ECC_Start() above has
+    // initialized the signing context CKey needs.
+    for (const std::string& hex : gArgs.GetArgs("-qtrnstakingkey")) {
+        const std::vector<unsigned char> raw = ParseHex(hex);
+        if (raw.size() != 32) {
+            return InitError(strprintf(_("Invalid -qtrnstakingkey: expected 32 raw bytes (64 hex characters), got %d"), raw.size()));
+        }
+        CKey key;
+        key.Set(raw.begin(), raw.end(), /*fCompressedIn=*/true);
+        if (!key.IsValid()) {
+            return InitError(_("Invalid -qtrnstakingkey: not a valid secp256k1 private key"));
+        }
+        qtrn::g_local_stake_signer.AddKey(key);
+    }
 
     // Sanity check
     if (!InitSanityCheck())

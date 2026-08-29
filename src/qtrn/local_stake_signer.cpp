@@ -8,6 +8,8 @@
 
 namespace qtrn {
 
+LocalStakeSigner g_local_stake_signer;
+
 void LocalStakeSigner::AddKey(const CKey& key)
 {
     m_keysById[StakeValidatorIdFromPubKey(key.GetPubKey())] = key;

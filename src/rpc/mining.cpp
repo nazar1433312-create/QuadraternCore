@@ -16,6 +16,10 @@
 #include <node/context.h>
 #include <policy/fees.h>
 #include <pow.h>
+#include <qtrn/genesis_stakers.h>
+#include <qtrn/local_stake_signer.h>
+#include <qtrn/staked_block.h>
+#include <qtrn/stake_pool.h>
 #include <rpc/blockchain.h>
 #include <rpc/mining.h>
 #include <rpc/server.h>
@@ -168,6 +172,83 @@ static UniValue generateBlocks(ChainstateManager& chainman, const CTxMemPool& me
     return blockHashes;
 }
 
+// testnet-1 only (see PROGRESS.md): same shape as GenerateBlock above, but
+// attaches a PoS stake commitment (signed with whatever key
+// qtrn::g_local_stake_signer holds locally — see -qtrnstakingkey in
+// init.cpp) before mining PoW, since this chain rejects blocks without one.
+static bool GenerateStakedBlock(ChainstateManager& chainman, CBlock& block, uint64_t& max_tries, unsigned int& extra_nonce, uint256& block_hash)
+{
+    block_hash.SetNull();
+
+    CBlockIndex* pindexPrev;
+    {
+        LOCK(cs_main);
+        pindexPrev = ::ChainActive().Tip();
+        IncrementExtraNonce(&block, pindexPrev, extra_nonce);
+    }
+
+    const CChainParams& chainparams = Params();
+    const auto candidates = qtrn::AssembleStakeCandidates(qtrn::GenesisStakersToBalances(chainparams.GetConsensus().genesisStakers));
+    const uint256 primarySeed = pindexPrev->GetBlockHash();
+
+    static constexpr uint32_t MAX_STAKE_COMMITMENT_ATTEMPT = 20; // must match validation.cpp's CheckStakeCommitment
+    CBlock stakedBlock;
+    if (!qtrn::TryBuildStakedBlock(block, primarySeed, candidates, qtrn::g_local_stake_signer, MAX_STAKE_COMMITMENT_ATTEMPT, stakedBlock)) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "No -qtrnstakingkey on this node matches the selected PoS validator for the next block (see contrib/testnet1-genesis-stakers.md)");
+    }
+
+    while (max_tries > 0 && stakedBlock.nNonce < std::numeric_limits<uint32_t>::max() && !CheckProofOfWork(stakedBlock.GetPoWHash(), stakedBlock.nBits, chainparams.GetConsensus()) && !ShutdownRequested()) {
+        ++stakedBlock.nNonce;
+        --max_tries;
+    }
+    if (max_tries == 0 || ShutdownRequested()) {
+        return false;
+    }
+    if (stakedBlock.nNonce == std::numeric_limits<uint32_t>::max()) {
+        return true;
+    }
+
+    std::shared_ptr<const CBlock> shared_pblock = std::make_shared<const CBlock>(stakedBlock);
+    if (!chainman.ProcessNewBlock(chainparams, shared_pblock, true, nullptr)) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "ProcessNewBlock, block not accepted");
+    }
+
+    block_hash = stakedBlock.GetHash();
+    return true;
+}
+
+static UniValue generateStakedBlocks(ChainstateManager& chainman, const CTxMemPool& mempool, const CScript& coinbase_script, int nGenerate, uint64_t nMaxTries)
+{
+    int nHeightEnd = 0;
+    int nHeight = 0;
+
+    {   // Don't keep cs_main locked
+        LOCK(cs_main);
+        nHeight = ::ChainActive().Height();
+        nHeightEnd = nHeight+nGenerate;
+    }
+    unsigned int nExtraNonce = 0;
+    UniValue blockHashes(UniValue::VARR);
+    while (nHeight < nHeightEnd && !ShutdownRequested())
+    {
+        std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(mempool, Params()).CreateNewBlock(coinbase_script));
+        if (!pblocktemplate.get())
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Couldn't create new block");
+        CBlock *pblock = &pblocktemplate->block;
+
+        uint256 block_hash;
+        if (!GenerateStakedBlock(chainman, *pblock, nMaxTries, nExtraNonce, block_hash)) {
+            break;
+        }
+
+        if (!block_hash.IsNull()) {
+            ++nHeight;
+            blockHashes.push_back(block_hash.GetHex());
+        }
+    }
+    return blockHashes;
+}
+
 static bool getScriptFromDescriptor(const std::string& descriptor, CScript& script, std::string& error)
 {
     FlatSigningProvider key_provider;
@@ -291,6 +372,46 @@ static RPCHelpMan generatetoaddress()
     CScript coinbase_script = GetScriptForDestination(destination);
 
     return generateBlocks(chainman, mempool, coinbase_script, num_blocks, max_tries);
+},
+    };
+}
+
+static RPCHelpMan generatestakedblocks()
+{
+    return RPCHelpMan{"generatestakedblocks",
+                "\ntestnet-1 only. Mine blocks immediately to a specified address, each carrying a PoS stake "
+                "commitment signed with a key loaded via -qtrnstakingkey (see contrib/testnet1-genesis-stakers.md). "
+                "Fails if no locally-held key matches the selected validator for a given block.\n",
+                {
+                    {"nblocks", RPCArg::Type::NUM, RPCArg::Optional::NO, "How many blocks are generated immediately."},
+                    {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The address to send the newly generated litecoin to."},
+                    {"maxtries", RPCArg::Type::NUM, /* default */ ToString(DEFAULT_MAX_TRIES), "How many iterations to try."},
+                },
+                RPCResult{
+                    RPCResult::Type::ARR, "", "hashes of blocks generated",
+                    {
+                        {RPCResult::Type::STR_HEX, "", "blockhash"},
+                    }},
+                RPCExamples{
+            "\nGenerate 1 staked block to myaddress\n"
+            + HelpExampleCli("generatestakedblocks", "1 \"myaddress\"")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    const int num_blocks{request.params[0].get_int()};
+    const uint64_t max_tries{request.params[2].isNull() ? DEFAULT_MAX_TRIES : request.params[2].get_int()};
+
+    CTxDestination destination = DecodeDestination(request.params[1].get_str());
+    if (!IsValidDestination(destination) || destination.type() == typeid(StealthAddress)) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Error: Invalid address");
+    }
+
+    const CTxMemPool& mempool = EnsureMemPool(request.context);
+    ChainstateManager& chainman = EnsureChainman(request.context);
+
+    CScript coinbase_script = GetScriptForDestination(destination);
+
+    return generateStakedBlocks(chainman, mempool, coinbase_script, num_blocks, max_tries);
 },
     };
 }
@@ -1238,6 +1359,7 @@ static const CRPCCommand commands[] =
 
 
     { "generating",         "generatetoaddress",      &generatetoaddress,      {"nblocks","address","maxtries"} },
+    { "generating",         "generatestakedblocks",   &generatestakedblocks,   {"nblocks","address","maxtries"} },
     { "generating",         "generatetodescriptor",   &generatetodescriptor,   {"num_blocks","descriptor","maxtries"} },
     { "generating",         "generateblock",          &generateblock,          {"output","transactions"} },
 

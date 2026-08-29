@@ -56,6 +56,13 @@ private:
     std::map<uint256, CKey> m_keysById;
 };
 
+//! Process-wide signer populated at startup from repeated -qtrnstakingkey=<hex>
+//! arguments (see init.cpp) — the one instance the mining RPC path uses. Kept
+//! as a plain global rather than threaded through NodeContext to keep this
+//! testnet-1-only integration point small and easy to delete once testnet-2's
+//! real network-based validator signing replaces it (see file header).
+extern LocalStakeSigner g_local_stake_signer;
+
 } // namespace qtrn
 
 #endif // BITCOIN_QTRN_LOCAL_STAKE_SIGNER_H
