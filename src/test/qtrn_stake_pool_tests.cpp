@@ -4,6 +4,8 @@
 
 #include <qtrn/stake_pool.h>
 
+#include <hash.h>
+
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
