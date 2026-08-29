@@ -68,8 +68,19 @@ uint32_t LwmaNextTarget(const std::vector<AlgoBlockSample>& samples, int64_t tar
     // — a higher-than-target weighted average solve time means blocks have
     // been arriving too slowly, so the target grows (easier); lower means
     // too fast, so it shrinks (harder).
-    arith_uint256 nextTarget = avgTarget * arith_uint256(static_cast<uint64_t>(sumWeightedSolvetimes));
-    nextTarget /= arith_uint256(static_cast<uint64_t>(targetSpacing * sumWeights));
+    //
+    // Divide by the denominator FIRST, then multiply — avgTarget can sit
+    // close to powLimit (up to ~240 bits for our testnet value), and the
+    // denominator/numerator here are both small (a few tens of thousands at
+    // LWMA_WINDOW=120). Multiplying avgTarget by the raw numerator before
+    // dividing overflows arith_uint256's fixed 256 bits and silently wraps
+    // (no exception — just a corrupted result), which is exactly what an
+    // earlier version of this function did. Dividing first keeps every
+    // intermediate value within range at the cost of a little integer-
+    // truncation precision, the standard tradeoff other difficulty-
+    // adjustment algorithms make for the same reason.
+    const arith_uint256 denominator(static_cast<uint64_t>(targetSpacing * sumWeights));
+    arith_uint256 nextTarget = (avgTarget / denominator) * arith_uint256(static_cast<uint64_t>(sumWeightedSolvetimes));
 
     // Clamp the step versus the most recent sample's own target — spec
     // decision: +15% looser / -10% tighter, max, regardless of what the raw
