@@ -32,6 +32,10 @@
 #include <pow.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
+#include <qtrn/genesis_stakers.h>
+#include <qtrn/stake_commitment.h>
+#include <qtrn/stake_pool.h>
+#include <qtrn/stake_selection.h>
 #include <random.h>
 #include <reverse_iterator.h>
 #include <script/script.h>
@@ -3725,6 +3729,8 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
  *  in ConnectBlock().
  *  Note that -reindex-chainstate skips the validation that happens here!
  */
+static bool CheckStakeCommitment(const CBlock& block, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, BlockValidationState& state);
+
 static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
 {
     const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
@@ -3806,6 +3812,49 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
 
     if (!MWEB::Node::ContextualCheckBlock(block, consensusParams, pindexPrev, state)) {
         return false;
+    }
+
+    if (!CheckStakeCommitment(block, consensusParams, pindexPrev, state)) {
+        return false;
+    }
+
+    return true;
+}
+
+// spec §6.2: a mined block only becomes valid once the PoS validator
+// SelectStakeValidator() picked (for the previous block's hash, or the
+// commitment's own claimed liveness-fallback attempt) has signed it. See
+// qtrn/stake_selection.h, qtrn/stake_commitment.h, qtrn/stake_pool.h,
+// qtrn/genesis_stakers.h and PROGRESS.md for the design and the
+// testnet-1-scope decision behind the fixed genesis staker list this draws
+// candidates from (a real address-balance index is deferred to testnet-2).
+static bool CheckStakeCommitment(const CBlock& block, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, BlockValidationState& state)
+{
+    if (pindexPrev == nullptr) return true; // genesis block predates any stake-commitment rule
+
+    static constexpr uint32_t MAX_STAKE_COMMITMENT_ATTEMPT = 20; // sanity bound, see stake_commitment.h
+
+    const auto candidates = qtrn::AssembleStakeCandidates(qtrn::GenesisStakersToBalances(consensusParams.genesisStakers));
+
+    qtrn::StakeCommitment commitment;
+    if (!qtrn::FindStakeCommitment(block.vtx[0]->vout, commitment)) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-missing", "block has no PoS validator commitment");
+    }
+    if (commitment.attempt > MAX_STAKE_COMMITMENT_ATTEMPT) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-attempt", "stake commitment attempt out of range");
+    }
+
+    const uint256 primarySeed = pindexPrev->GetBlockHash();
+    const uint256 seed = (commitment.attempt == 0) ? primarySeed : qtrn::DeriveFallbackSeed(primarySeed, commitment.attempt);
+
+    const size_t winnerIndex = qtrn::SelectStakeValidator(seed, candidates);
+    if (winnerIndex >= candidates.size()) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-no-candidate", "no eligible stake validator for this block");
+    }
+
+    const uint256 signingHash = qtrn::ComputeStakeSigningHash(block);
+    if (!qtrn::VerifyStakeCommitment(commitment, signingHash, candidates[winnerIndex].id)) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-signature", "PoS validator commitment failed verification");
     }
 
     return true;
