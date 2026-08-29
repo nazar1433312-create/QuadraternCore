@@ -97,6 +97,10 @@ public:
         consensus.nPowTargetTimespan = 2016 * 60; // retarget window in seconds (testnet-2 replaces this with per-algo LWMA)
         consensus.nPowTargetSpacing = 60; // 1-minute block time
         consensus.fPowAllowMinDifficultyBlocks = true; // eases early bring-up while real hashrate is low; revisit before mainnet
+        // testnet-2: same easy starting target on all three channels — real
+        // difficulty will diverge per algorithm once LWMA retargeting is
+        // wired in and each channel accrues its own hashrate history.
+        for (uint256& limit : consensus.powLimitPerAlgo) limit = consensus.powLimit;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 1512; // 75% of 2016
         consensus.nMinerConfirmationWindow = 2016;
@@ -222,6 +226,10 @@ public:
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
         consensus.nPowTargetSpacing = 2.5 * 60;
+        // testnet-2 fields left at stock Litecoin's single-algo powLimit for
+        // all three slots — this network (stock Litecoin testnet3) never
+        // exercises per-algo consensus code, only needs to not be all-zero.
+        for (uint256& limit : consensus.powLimitPerAlgo) limit = consensus.powLimit;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 1512; // 75% for testchains
@@ -320,6 +328,9 @@ public:
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 3.5 * 24 * 60 * 60; // 3.5 days
         consensus.nPowTargetSpacing = 2.5 * 60;
+        // testnet-2 fields left at stock regtest's single-algo powLimit for
+        // all three slots — see the CTestNetParams comment above.
+        for (uint256& limit : consensus.powLimitPerAlgo) limit = consensus.powLimit;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
         consensus.nRuleChangeActivationThreshold = 108; // 75% for testchains

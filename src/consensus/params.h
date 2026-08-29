@@ -8,6 +8,7 @@
 
 #include <amount.h>
 #include <pubkey.h>
+#include <qtrn/pow_algo.h>
 #include <uint256.h>
 #include <limits>
 #include <utility>
@@ -93,6 +94,25 @@ struct Params {
     int64_t nPowTargetSpacing;
     int64_t nPowTargetTimespan;
     int64_t DifficultyAdjustmentInterval() const { return nPowTargetTimespan / nPowTargetSpacing; }
+
+    /**
+     * testnet-2: per-algorithm PoW parameters (spec §6.1 — three parallel
+     * races, each independently retargeted over its own recent blocks, not
+     * a single shared difficulty). Indexed by qtrn::PowAlgo.
+     *
+     * nPowTargetSpacingPerAlgo is each algorithm's OWN individual target —
+     * spec: overall chain block_time × number of channels (60s × 3 = 180s)
+     * — so that with all three racing in parallel, the network's combined
+     * block rate averages back out to the 60s nPowTargetSpacing above. It is
+     * deliberately a single shared constant (not one value per algo): every
+     * channel targets the same 3-minute interval individually, only their
+     * *achieved* difficulty differs based on real hashrate.
+     */
+    uint256 powLimitPerAlgo[3];
+    int64_t nPowTargetSpacingPerAlgo{180};
+
+    uint256& PowLimitFor(qtrn::PowAlgo algo) { return powLimitPerAlgo[static_cast<size_t>(algo)]; }
+    const uint256& PowLimitFor(qtrn::PowAlgo algo) const { return powLimitPerAlgo[static_cast<size_t>(algo)]; }
     /** The best chain should have at least this much work */
     uint256 nMinimumChainWork;
     /** By default assume that the signatures in ancestors of this block are valid */
