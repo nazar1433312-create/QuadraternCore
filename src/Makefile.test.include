@@ -259,6 +259,7 @@ BITCOIN_TESTS =\
   test/prevector_tests.cpp \
   test/qtrn_genesis_stakers_tests.cpp \
   test/qtrn_local_stake_signer_tests.cpp \
+  test/qtrn_pow_algo_tests.cpp \
   test/qtrn_staked_block_tests.cpp \
   test/qtrn_stake_commitment_consensus_tests.cpp \
   test/qtrn_stake_commitment_tests.cpp \
