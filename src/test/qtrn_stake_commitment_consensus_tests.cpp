@@ -17,6 +17,7 @@
 
 #include <chainparams.h>
 #include <consensus/merkle.h>
+#include <consensus/validation.h>
 #include <key.h>
 #include <miner.h>
 #include <pow.h>
