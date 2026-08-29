@@ -6,10 +6,9 @@
 // implements the pure grouping/weighting logic — turning a flat list of
 // per-owner balances into the candidate list SelectStakeValidator (see
 // stake_selection.h) consumes. It deliberately does NOT walk the real UTXO
-// set or decide how a balance owner's pool choice gets recorded on-chain —
-// this chain has no address-balance index yet (only txindex/blockfilterindex
-// exist, see src/index/), and building one is a separate, larger piece of
-// work than the aggregation rule itself. See PROGRESS.md.
+// set — this chain has no address-balance index yet (only txindex/
+// blockfilterindex exist, see src/index/), and building one is a separate,
+// larger piece of work than the aggregation rule itself. See PROGRESS.md.
 
 #ifndef BITCOIN_QTRN_STAKE_POOL_H
 #define BITCOIN_QTRN_STAKE_POOL_H
@@ -26,43 +25,44 @@ namespace qtrn {
 //! Below this, a balance must be folded into a virtual pool instead.
 static const CAmount SOLO_STAKE_MINIMUM = 100 * COIN;
 
-//! One contribution to the stake-candidate set before aggregation — e.g. one
-//! UTXO's worth of a balance, or a wallet-level summary of several. Multiple
-//! entries with the same ownerId are expected (a real address will usually
-//! hold more than one UTXO) and get summed by AssembleStakeCandidates before
-//! any solo/pool decision is made.
+//! Fixed number of virtual pools (design decision: deterministic assignment,
+//! no on-chain pool registration — see DeterministicPoolId).
+static const uint32_t NUM_VIRTUAL_POOLS = 64;
+
+//! Deterministically assigns any owner id to one of NUM_VIRTUAL_POOLS pools —
+//! no on-chain registration transaction, no registry index. Every node
+//! computes the same answer from the owner id alone.
 //!
-//! `poolId`/`hasPool` express the owner's standing choice to participate in a
-//! virtual pool (spec §6.3: wallet UI, "participate in virtual pool #N"). How
-//! that choice is actually recorded on-chain (a registration transaction? a
-//! wallet-local default with no on-chain footprint, since every node just
-//! needs to agree on the rule, not on an announcement?) is intentionally out
-//! of scope here — see the file-level comment above.
+//! This is deliberately not a user choice. For a pool that pays out
+//! proportionally to member weight, an owner's expected reward reduces to
+//! (their balance / total network stake weight) regardless of which pool
+//! they land in — the pool only affects variance (a smaller pool wins less
+//! often but pays out more when it does), never expected value. Since
+//! there's nothing to gain by landing in a particular pool, there's no
+//! incentive to grind for one, and no reason to spend an on-chain
+//! transaction (or build a registry index) just to let an owner pick.
+uint256 DeterministicPoolId(const uint256& ownerId);
+
+//! One contribution to the stake-candidate set before aggregation — e.g. one
+//! UTXO's worth of a balance. Multiple entries with the same ownerId are
+//! expected (a real address will usually hold more than one UTXO) and get
+//! summed by AssembleStakeCandidates before any solo/pool decision is made.
 struct StakeCandidateBalance {
     uint256 ownerId;
     CAmount amount = 0;
-    uint256 poolId;
-    bool hasPool = false;
 };
 
 //! Groups `balances` by ownerId (summing amounts), then:
-//!   - an owner whose summed total is >= SOLO_STAKE_MINIMUM always becomes
-//!     their own candidate (id = ownerId, weight = total) — regardless of any
-//!     declared pool. Pooling exists to bound per-block computation for the
-//!     long tail of small holders; it isn't needed once a balance clears the
-//!     solo threshold, so large balances stay individually identifiable
-//!     rather than being silently folded away.
-//!   - a sub-threshold owner with hasPool folds their total into that pool's
-//!     running sum (id = poolId, weight = sum of all its members' totals).
-//!   - a sub-threshold owner with no declared pool is dropped entirely: not
-//!     a low-weight candidate, not a candidate at all. This is a deliberate
-//!     asymmetry with SelectStakeValidator's own "non-positive weight never
-//!     wins" handling — here the balance doesn't even count towards a pool's
-//!     weight, since it was never aggregated into one.
-//! If the same owner reports inconsistent pool choices across entries, the
-//! first entry's choice for that owner wins — callers should tag every entry
-//! for one owner identically (a real assembler should apply one wallet-level
-//! choice uniformly across all of an owner's UTXOs, not decide per-UTXO).
+//!   - an owner whose summed total is >= SOLO_STAKE_MINIMUM becomes their own
+//!     candidate (id = ownerId, weight = total). Pooling exists to bound
+//!     per-block computation for the long tail of small holders; once a
+//!     balance clears the solo threshold it stays individually identifiable
+//!     rather than being folded into a pool.
+//!   - a sub-threshold owner is folded into DeterministicPoolId(ownerId)'s
+//!     running sum (weight = sum of all that pool's members' totals). There
+//!     is no "opt out" — every sub-threshold balance lands in exactly one of
+//!     the NUM_VIRTUAL_POOLS pools.
+//!   - a non-positive total is dropped (not eligible either way).
 std::vector<StakeCandidate> AssembleStakeCandidates(const std::vector<StakeCandidateBalance>& balances);
 
 } // namespace qtrn
