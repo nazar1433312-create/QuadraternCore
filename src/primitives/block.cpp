@@ -9,18 +9,19 @@
 #include <tinyformat.h>
 #include <util/strencodings.h>
 #include <crypto/common.h>
-#include <crypto/scrypt.h>
 
 uint256 CBlockHeader::GetHash() const
 {
     return SerializeHash(*this);
 }
 
+// testnet-1: single-algo PoW (SHA-256d), matching cycle-1 of the Quadratern
+// emission schedule. testnet-2 replaces this with per-algorithm dispatch
+// (SHA-256 / ProgPoW / RandomX) selected by a header-encoded algo id.
+// See ROADMAP.md.
 uint256 CBlockHeader::GetPoWHash() const
 {
-    uint256 thash;
-    scrypt_1024_1_1_256(BEGIN(nVersion), BEGIN(thash));
-    return thash;
+    return SerializeHash(*this);
 }
 
 std::string CBlock::ToString() const

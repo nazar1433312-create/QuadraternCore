@@ -6,8 +6,11 @@
 #ifndef BITCOIN_CONSENSUS_PARAMS_H
 #define BITCOIN_CONSENSUS_PARAMS_H
 
+#include <amount.h>
+#include <pubkey.h>
 #include <uint256.h>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace Consensus {
@@ -103,6 +106,15 @@ struct Params {
 
     /** Frozen MWEB output IDs that may not be spent. */
     std::vector<uint256> frozen_mweb_output_ids;
+
+    /**
+     * testnet-1 scope decision (see PROGRESS.md): rather than a full
+     * address-balance index ("any balance can stake" — deferred to
+     * testnet-2), the PoS validator-selection candidate set is seeded from
+     * this small fixed genesis staker list, the same way real PoS chains
+     * bootstrap their initial validator set. {pubkey, weight in Quad}.
+     */
+    std::vector<std::pair<CPubKey, CAmount>> genesisStakers;
 
     /**
      * If true, witness commitments contain a payload equal to a Bitcoin Script solution

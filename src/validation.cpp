@@ -32,6 +32,10 @@
 #include <pow.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
+#include <qtrn/genesis_stakers.h>
+#include <qtrn/stake_commitment.h>
+#include <qtrn/stake_pool.h>
+#include <qtrn/stake_selection.h>
 #include <random.h>
 #include <reverse_iterator.h>
 #include <script/script.h>
@@ -1276,17 +1280,44 @@ bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CBlockIndex* pindex
     return ReadRawBlockFromDisk(block, block_pos, message_start);
 }
 
+// Quadratern emission schedule (spec §3-4): halving is triggered by cumulative
+// mined volume, not a fixed block interval — but since the reward is constant
+// within each cycle, "every 24,000,000 QTRN mined" converts exactly to a fixed
+// block-height threshold (volume / reward-per-block = blocks-in-cycle). Values
+// below are those thresholds, precomputed once and documented here so they
+// don't need to be re-derived at runtime.
+//
+//   cycle | coin range       | reward/block | height range        | blocks
+//   ------+------------------+--------------+----------------------+---------
+//     1   | 0 - 24M          | 100          | 1 - 240,000          | 240,000
+//     2   | 24M - 48M        | 50           | 240,001 - 720,000    | 480,000
+//     3   | 48M - 72M        | 25           | 720,001 - 1,680,000  | 960,000
+//     4   | 72M - 96M        | 12.5         | 1,680,001 - 3,600,000| 1,920,000
+//     5   | 96M - 108M       | 6.25         | 3,600,001 - 5,520,000| 1,920,000
+//     6   | 108M - 114M      | 3.125        | 5,520,001 - 7,440,000| 1,920,000
+//     7   | 114M - 117M      | 1.5625       | 7,440,001 - 9,360,000| 1,920,000
+//     8   | 117M - 118.5M    | 0.78125      | 9,360,001 -11,280,000| 1,920,000
+//   tail  | 118.5M -> forever| 1            | 11,280,001 -> forever|
+//
+// Past height 11,280,000 (~22 years at the 1-minute block time), the tail
+// emission of exactly 1 QTRN/block applies forever — see spec §4.
 CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
 {
-    int halvings = nHeight / consensusParams.nSubsidyHalvingInterval;
-    // Force block reward to zero when right shift is undefined.
-    if (halvings >= 64)
-        return 0;
+    static const struct { int untilHeight; CAmount reward; } kSchedule[] = {
+        {   240000, CAmount{10000000000LL} }, // 100 QTRN
+        {   720000, CAmount{ 5000000000LL} }, //  50 QTRN
+        {  1680000, CAmount{ 2500000000LL} }, //  25 QTRN
+        {  3600000, CAmount{ 1250000000LL} }, //  12.5 QTRN
+        {  5520000, CAmount{  625000000LL} }, //   6.25 QTRN
+        {  7440000, CAmount{  312500000LL} }, //   3.125 QTRN
+        {  9360000, CAmount{  156250000LL} }, //   1.5625 QTRN
+        { 11280000, CAmount{   78125000LL} }, //   0.78125 QTRN
+    };
 
-    CAmount nSubsidy = 50 * COIN;
-    // Subsidy is cut in half every 210,000 blocks which will occur approximately every 4 years.
-    nSubsidy >>= halvings;
-    return nSubsidy;
+    for (const auto& cycle : kSchedule) {
+        if (nHeight <= cycle.untilHeight) return cycle.reward;
+    }
+    return CAmount{100000000LL}; // tail emission: 1 QTRN/block, forever
 }
 
 CoinsViews::CoinsViews(
@@ -3698,7 +3729,16 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
  *  in ConnectBlock().
  *  Note that -reindex-chainstate skips the validation that happens here!
  */
-static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
+static bool CheckStakeCommitment(const CBlock& block, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, BlockValidationState& state);
+
+// fCheckStakeCommitment=false lets BlockAssembler::CreateNewBlock's internal
+// TestBlockValidity self-check pass on a bare template — the PoS validator's
+// signature is added by the miner in a separate step *after* CreateNewBlock
+// returns (spec §6.2: it requires waiting on an external party, unlike
+// SegWit's witness commitment, which the miner can always self-compute
+// immediately and therefore embeds before this self-check ever runs). Real
+// block acceptance (AcceptBlock) always uses the default (true).
+static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, bool fCheckStakeCommitment = true)
 {
     const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
 
@@ -3779,6 +3819,49 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
 
     if (!MWEB::Node::ContextualCheckBlock(block, consensusParams, pindexPrev, state)) {
         return false;
+    }
+
+    if (fCheckStakeCommitment && !CheckStakeCommitment(block, consensusParams, pindexPrev, state)) {
+        return false;
+    }
+
+    return true;
+}
+
+// spec §6.2: a mined block only becomes valid once the PoS validator
+// SelectStakeValidator() picked (for the previous block's hash, or the
+// commitment's own claimed liveness-fallback attempt) has signed it. See
+// qtrn/stake_selection.h, qtrn/stake_commitment.h, qtrn/stake_pool.h,
+// qtrn/genesis_stakers.h and PROGRESS.md for the design and the
+// testnet-1-scope decision behind the fixed genesis staker list this draws
+// candidates from (a real address-balance index is deferred to testnet-2).
+static bool CheckStakeCommitment(const CBlock& block, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, BlockValidationState& state)
+{
+    if (pindexPrev == nullptr) return true; // genesis block predates any stake-commitment rule
+
+    static constexpr uint32_t MAX_STAKE_COMMITMENT_ATTEMPT = 20; // sanity bound, see stake_commitment.h
+
+    const auto candidates = qtrn::AssembleStakeCandidates(qtrn::GenesisStakersToBalances(consensusParams.genesisStakers));
+
+    qtrn::StakeCommitment commitment;
+    if (!qtrn::FindStakeCommitment(block.vtx[0]->vout, commitment)) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-missing", "block has no PoS validator commitment");
+    }
+    if (commitment.attempt > MAX_STAKE_COMMITMENT_ATTEMPT) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-attempt", "stake commitment attempt out of range");
+    }
+
+    const uint256 primarySeed = pindexPrev->GetBlockHash();
+    const uint256 seed = (commitment.attempt == 0) ? primarySeed : qtrn::DeriveFallbackSeed(primarySeed, commitment.attempt);
+
+    const size_t winnerIndex = qtrn::SelectStakeValidator(seed, candidates);
+    if (winnerIndex >= candidates.size()) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-no-candidate", "no eligible stake validator for this block");
+    }
+
+    const uint256 signingHash = qtrn::ComputeStakeSigningHash(block);
+    if (!qtrn::VerifyStakeCommitment(commitment, signingHash, candidates[winnerIndex].id)) {
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-stake-commitment-signature", "PoS validator commitment failed verification");
     }
 
     return true;
@@ -4039,7 +4122,7 @@ bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const s
     return true;
 }
 
-bool TestBlockValidity(BlockValidationState& state, const CChainParams& chainparams, const CBlock& block, CBlockIndex* pindexPrev, bool fCheckPOW, bool fCheckMerkleRoot)
+bool TestBlockValidity(BlockValidationState& state, const CChainParams& chainparams, const CBlock& block, CBlockIndex* pindexPrev, bool fCheckPOW, bool fCheckMerkleRoot, bool fCheckStakeCommitment)
 {
     AssertLockHeld(cs_main);
     assert(pindexPrev && pindexPrev == ::ChainActive().Tip());
@@ -4055,7 +4138,7 @@ bool TestBlockValidity(BlockValidationState& state, const CChainParams& chainpar
         return error("%s: Consensus::ContextualCheckBlockHeader: %s", __func__, state.ToString());
     if (!CheckBlock(block, state, chainparams.GetConsensus(), fCheckPOW, fCheckMerkleRoot))
         return error("%s: Consensus::CheckBlock: %s", __func__, state.ToString());
-    if (!ContextualCheckBlock(block, state, chainparams.GetConsensus(), pindexPrev))
+    if (!ContextualCheckBlock(block, state, chainparams.GetConsensus(), pindexPrev, fCheckStakeCommitment))
         return error("%s: Consensus::ContextualCheckBlock: %s", __func__, state.ToString());
     if (!::ChainstateActive().ConnectBlock(block, state, &indexDummy, viewNew, chainparams, true))
         return false;

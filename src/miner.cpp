@@ -196,7 +196,10 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     pblocktemplate->vTxSigOpsCost[0] = WITNESS_SCALE_FACTOR * GetLegacySigOpCount(*pblock->vtx[0]);
 
     BlockValidationState state;
-    if (!TestBlockValidity(state, chainparams, *pblock, pindexPrev, false, false)) {
+    // fCheckStakeCommitment=false: the PoS validator's signature is added by
+    // the miner *after* this template is returned (spec §6.2) — see the
+    // comment on ContextualCheckBlock's fCheckStakeCommitment parameter.
+    if (!TestBlockValidity(state, chainparams, *pblock, pindexPrev, false, false, false)) {
         throw std::runtime_error(strprintf("%s: TestBlockValidity failed: %s", __func__, state.ToString()));
     }
     int64_t nTime2 = GetTimeMicros();
